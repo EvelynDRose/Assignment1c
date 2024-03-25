@@ -1,7 +1,6 @@
 # Assignment 1 c
 
-This code provides the implementation of *RoBERTa-PFGCN* as described in out paper, a method to generate Graph of 
-Program dubbed SVG with our novel Poacher Flow Edges. We use RoBERTa to generate embeddings and GCN for vulnerability detection and classification.
+This code fine tunes 3 models (Llama2, Phi2, and Mistral) on the Standord Alpaca dataset. It then evaluates the models' BLEU, Rogue-L, and BERTScores.
 
 #### Requirements
 - Python 	3.11
