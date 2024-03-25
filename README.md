@@ -14,13 +14,6 @@ Program dubbed SVG with our novel Poacher Flow Edges. We use RoBERTa to generate
 - tabulate
 - statistics
 
-Instructions to install libraries using *requirements.txt* file.
-
-```shell
-cd code 
-pip install -r requirements.txt
-```
-
 ### Datasets
 - Download the Stanford Alpaca dataset at https://github.com/tatsu-lab/stanford_alpaca?tab=readme-ov-file#data-release
 
