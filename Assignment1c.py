@@ -1,7 +1,6 @@
 # Imports
 from datasets import load_dataset
 from transformers import LlamaForCausalLM, LlamaTokenizer, AutoModelForCausalLM, AutoTokenizer, TrainingArguments, Trainer, AutoModelForCausalLM, AutoTokenizer,  BitsAndBytesConfig, AutoTokenizer
-import numpy as np
 import evaluate
 import torch
 from peft import LoraConfig
@@ -23,8 +22,8 @@ bnb_config = BitsAndBytesConfig(
 )
 
 # Models
-model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-2-7b-hf", token="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", quantization_config=bnb_config, device_map="auto")
-tokenizer = tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-hf", add_eos_token=True, add_bos_token=True)
+model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-2-7b-chat-hf", token="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", quantization_config=bnb_config, device_map="auto")
+tokenizer = tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-chat-hf", add_eos_token=True, add_bos_token=True)
 
 # model = AutoModelForCausalLM.from_pretrained("microsoft/phi-2", quantization_config=bnb_config, device_map="auto")
 # tokenizer = AutoTokenizer.from_pretrained("microsoft/phi-2", add_eos_token=True)
@@ -32,8 +31,11 @@ tokenizer = tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-hf"
 # model = AutoModelForCausalLM.from_pretrained("mistralai/Mistral-7B-v0.1", quantization_config=bnb_config, device_map="auto")
 # tokenizer = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-v0.1")
 
-# model = AutoModelForCausalLM.from_pretrained("results_llama\checkpoint-8500", quantization_config=bnb_config, device_map="auto")
-# tokenizer = tokenizer = AutoTokenizer.from_pretrained("results_llama\checkpoint-8500", add_eos_token=True, add_bos_token=True)
+# model = AutoModelForCausalLM.from_pretrained("results_llama\checkpoint-42000", quantization_config=bnb_config, device_map="auto")
+# tokenizer = AutoTokenizer.from_pretrained("results_llama\checkpoint-42000", add_eos_token=True, add_bos_token=True)
+
+# model = AutoModelForCausalLM.from_pretrained("results_phi\checkpoint-42000", quantization_config=bnb_config, device_map="auto")
+# tokenizer = AutoTokenizer.from_pretrained("results_phi\checkpoint-42000", add_eos_token=True, add_bos_token=True)
 
 
 if tokenizer.pad_token is None:
@@ -49,7 +51,7 @@ peft_params = LoraConfig(
 
 # mapping
 def formatting_func(example):
-    text = f"### Instruction: {example['instruction']}\nInput: {example['input']}\n### Answer: {example['output']}"
+    text = f"###Given an instruction and input, return the correct answer.\n Instruction: {example['instruction']}\nInput: {example['input']}\n### Answer: {example['output']}"
     return text
 def generate_and_tokenize_prompt(prompt):
     result = tokenizer(formatting_func(prompt), truncation=True, max_length=512, padding="max_length")
@@ -60,17 +62,25 @@ def generate_and_tokenize_prompt(prompt):
 metric_b = evaluate.load("bleu")
 metric_r = evaluate.load('rouge')
 metric_be = evaluate.load("bertscore")
-b, r, be = [],[],[]
+b, r, be, human = [],[],[],[]
 def compute_metrics(eval_pred):
     preds, decoded_preds = [], []
-
+    pred_input, ref_input, = [],[3]*20
     for i in range(len(eval_pred)):
-        print(i)
+        print("TEXT: ", i)
         text = f"Given an instruction and input, return the correct answer. \nInstruction: {eval_pred['instruction'][i]}\nInput: {eval_pred['input'][i]}\nAnswer:"
         text2 = f"Given an instruction and input, return the correct answer. \nInstruction: {eval_pred['instruction'][i]}\nInput: {eval_pred['input'][i]}\nAnswer:{eval_pred['output'][i]}"
         preds.append(text2)
+        # print("ANSWER: ", eval_pred[i])
         model_input = tokenizer(text, return_tensors="pt").to("cuda")
-        decoded_preds.append(tokenizer.decode(model.generate(**model_input, max_new_tokens=100)[0], skip_special_tokens=True))
+        response = tokenizer.decode(model.generate(**model_input, max_new_tokens=len(model_input.input_ids[0]))[0], skip_special_tokens=True, eos_token_id=50256)
+        decoded_preds.append(response)
+        print("This is the response generated")
+        print("What would you rate this response on a scale from 1-3: ")
+        print(decoded_preds[i])
+        pred_input.append(int(input())/3)
+
+    human.append([((sum(ref_input + pred_input))/20)])
 
     b.append(metric_b.compute(predictions=preds, references=decoded_preds))
     r.append(metric_r.compute(predictions=preds, references=decoded_preds))
@@ -88,12 +98,12 @@ print(tokenized_dataset)
 # params
 training_params = TrainingArguments(
     output_dir="./results_phi",
-    num_train_epochs=1,
+    num_train_epochs=5,
     per_device_train_batch_size=6,
     gradient_accumulation_steps=1,
     optim="paged_adamw_32bit",
-    save_steps=500,
-    logging_steps=500,
+    save_steps=7000,
+    logging_steps=7000,
     learning_rate=2e-4,
     weight_decay=0.001,
     fp16=False,
@@ -121,16 +131,17 @@ trainer = SFTTrainer(
 # task 1
 trainer.train()
 
+
 # task 2
-# compute_metrics(eval_set)
+compute_metrics(eval_set)
 
-# # table
-# head =  [      "BLEU",      "Rogue-L",              "BERTScore"]
-# row =   [b[0]['bleu'], r[0]['rougeL'], mean(be[0]["precision"])]
+# table
+head =  [      "BLEU",      "Rogue-L",              "BERTScore", "Human Eval"]
+row =   [b[0]['bleu'], r[0]['rougeL'], mean(be[0]["precision"]),     human[0]]
 
-# table = [row]
+table = [row]
 
-# print(tabulate(table, headers=head, tablefmt="grid"))
+print(tabulate(table, headers=head, tablefmt="grid"))
 
 
 # Task 3
@@ -140,33 +151,70 @@ t = [.3,.5,.8,1]
 def task3(eval_pred):
     for j in range(len(k)):
         preds, decoded_preds_k, decoded_preds_beam, decoded_preds_t = [], [], [], []
+        pred_input, k_input, b_input, t_input = [3]*20,[],[],[]
         for i in range(len(eval_pred)):
             print(i)
             text = f"Given an instruction and input, return the correct answer. \nInstruction: {eval_pred['instruction'][i]}\nInput: {eval_pred['input'][i]}\nAnswer:"
             text2 = f"Given an instruction and input, return the correct answer. \nInstruction: {eval_pred['instruction'][i]}\nInput: {eval_pred['input'][i]}\nAnswer:{eval_pred['output'][i]}"
             preds.append(text2)
             model_input = tokenizer(text, return_tensors="pt").to("cuda")
-            decoded_preds_k.append(tokenizer.decode(model.generate(**model_input, max_new_tokens=100)[0], skip_special_tokens=True, top_k = k[j]))
-            decoded_preds_beam.append(tokenizer.decode(model.generate(**model_input, max_new_tokens=100)[0], skip_special_tokens=True, beam_size = beam[j]))
-            decoded_preds_t.append(tokenizer.decode(model.generate(**model_input, max_new_tokens=100)[0], skip_special_tokens=True, temperature = t[j]))
+            decoded_preds_k.append(tokenizer.decode(model.generate(**model_input, max_new_tokens=500)[0], skip_special_tokens=True, top_k = k[j]))
+            decoded_preds_beam.append(tokenizer.decode(model.generate(**model_input, max_new_tokens=500)[0], skip_special_tokens=True, beam_size = beam[j]))
+            decoded_preds_t.append(tokenizer.decode(model.generate(**model_input, max_new_tokens=500)[0], skip_special_tokens=True, temperature = t[j]))
 
-        b.append([metric_b.compute(predictions=preds, references=decoded_preds_k), metric_b.compute(predictions=preds, references=decoded_preds_beam), metric_b.compute(predictions=preds, references=decoded_preds_t)])
-        r.append([metric_r.compute(predictions=preds, references=decoded_preds_k), metric_r.compute(predictions=preds, references=decoded_preds_beam), metric_r.compute(predictions=preds, references=decoded_preds_t)])
-        be.append([metric_be.compute(predictions=preds, references=decoded_preds_k, lang="en"), metric_be.compute(predictions=preds, references=decoded_preds_beam, lang="en"), metric_be.compute(predictions=preds, references=decoded_preds_t, lang="en")])
+            # print("What would you rate this response on a scale from 1-3: ")
+            # print(text2)
+            # pred_input.append(int(input())/3)
 
-b, r, be = [],[],[]
+            # print()
+            # print()
+            # print()
+
+            print("This is the response generated with top_k="+str(k[j]))
+            print("What would you rate this response on a scale from 1-3: ")
+            print(decoded_preds_k[i])
+            k_input.append(int(input())/3)
+
+            print()
+            print()
+            print()
+
+            print("This is the response generated with beam_size="+str(beam[j]))
+            print("What would you rate this response on a scale from 1-3: ")
+            print(decoded_preds_beam[i])
+            b_input.append(int(input())/3)
+
+            print()
+            print()
+            print()
+
+            print("This is the response generated with temperature="+str(t[j]))
+            print("What would you rate this response on a scale from 1-3: ")
+            print(decoded_preds_t[i])
+            t_input.append(int(input())/3)
+
+
+        human.append([((sum(pred_input + k_input))/20), ((sum(pred_input + b_input))/20), ((sum(pred_input + t_input))/20)])
+
+
+        b.append([metric_b.compute(predictions=decoded_preds_k, references=preds), metric_b.compute(predictions=decoded_preds_beam, references=preds), metric_b.compute(predictions=decoded_preds_t, references=preds)])
+        r.append([metric_r.compute(predictions=decoded_preds_k, references=preds), metric_r.compute(predictions=decoded_preds_beam, references=preds), metric_r.compute(predictions=decoded_preds_t, references=preds)])
+        be.append([metric_be.compute(predictions=decoded_preds_k, references=preds, lang="en"), metric_be.compute(predictions=decoded_preds_beam, references=preds, lang="en"), metric_be.compute(predictions=decoded_preds_t, references=preds, lang="en")])
+
+b, r, be, human = [],[],[],[]
 task3(eval_set)
 
-print(b)
-print(r)
-print(be)
+# print(b)
+# print(r)
+# print(be)
+# print(human)
 
 for i in range(len(b)):
     # table
-    head =  ["",      "BLEU",      "Rogue-L",              "BERTScore"]
-    row_k =   ["k="+str(k[i]), b[i][0]['bleu'], r[i][0]['rougeL'], mean(be[i][0]["precision"])]
-    row_b =   ["b="+str(b[i]), b[i][1]['bleu'], r[i][1]['rougeL'], mean(be[i][1]["precision"])]
-    row_t =   ["t="+str(t[i]), b[i][2]['bleu'], r[i][2]['rougeL'], mean(be[i][2]["precision"])]
+    head =    ["",                      "BLEU",         "Rogue-L",               "BERTScore",  "Human Eval"]
+    row_k =   ["k="+str(k[i]), b[i][0]['bleu'], r[i][0]['rougeL'], mean(be[i][0]["precision"]), human[i][0]]
+    row_b =   ["b="+str(beam[i]), b[i][1]['bleu'], r[i][1]['rougeL'], mean(be[i][1]["precision"]), human[i][1]]
+    row_t =   ["t="+str(t[i]), b[i][2]['bleu'], r[i][2]['rougeL'], mean(be[i][2]["precision"]), human[i][2]]
 
     table = [row_k,row_b,row_t]
 
